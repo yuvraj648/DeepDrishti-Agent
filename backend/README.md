@@ -1,4 +1,4 @@
- # AquaScope Backend API
+# AquaScope Backend API
 
 Full-stack Node.js + Express + MongoDB backend for AquaScope underwater detection system.
 
@@ -39,26 +39,27 @@ BACKEND/
 ## Installation
 
 1. **Install Dependencies**
+
    ```bash
    npm install
    ```
-
 2. **Environment Setup**
+
    ```bash
    # Copy .env file and update with your configuration
    cp .env.example .env
    ```
-
 3. **MongoDB Setup**
+
    - Install MongoDB locally or use MongoDB Atlas
    - Update `MONGODB_URI` in `.env` file
-
 4. **Start Development Server**
+
    ```bash
    npm run dev
    ```
-
 5. **Start Production Server**
+
    ```bash
    npm start
    ```
@@ -67,34 +68,34 @@ BACKEND/
 
 ### Detection Routes (`/api/v1/detections`)
 
-| Method | Endpoint | Description | Access |
-|---------|-----------|-------------|---------|
-| GET | `/` | Get all detections (with filters) | Public |
-| GET | `/stats` | Get detection statistics | Public |
-| GET | `/:id` | Get single detection | Public |
-| POST | `/` | Create new detection | Public |
-| PUT | `/:id` | Update detection | Public |
-| DELETE | `/:id` | Delete detection | Public |
-| PATCH | `/:id/confirm` | Confirm detection | Public |
-| PATCH | `/:id/false-positive` | Mark as false positive | Public |
+| Method | Endpoint                | Description                       | Access |
+| ------ | ----------------------- | --------------------------------- | ------ |
+| GET    | `/`                   | Get all detections (with filters) | Public |
+| GET    | `/stats`              | Get detection statistics          | Public |
+| GET    | `/:id`                | Get single detection              | Public |
+| POST   | `/`                   | Create new detection              | Public |
+| PUT    | `/:id`                | Update detection                  | Public |
+| DELETE | `/:id`                | Delete detection                  | Public |
+| PATCH  | `/:id/confirm`        | Confirm detection                 | Public |
+| PATCH  | `/:id/false-positive` | Mark as false positive            | Public |
 
 ### User Routes (`/api/v1/users`)
 
-| Method | Endpoint | Description | Access |
-|---------|-----------|-------------|---------|
-| GET | `/` | Get all users | Admin |
-| GET | `/stats` | Get user statistics | Admin |
-| GET | `/:id` | Get single user | Private |
-| POST | `/` | Create new user | Admin |
-| PUT | `/:id` | Update user | Private |
-| DELETE | `/:id` | Delete user | Admin |
-| PATCH | `/:id/password` | Update password | Private |
+| Method | Endpoint          | Description         | Access  |
+| ------ | ----------------- | ------------------- | ------- |
+| GET    | `/`             | Get all users       | Admin   |
+| GET    | `/stats`        | Get user statistics | Admin   |
+| GET    | `/:id`          | Get single user     | Private |
+| POST   | `/`             | Create new user     | Admin   |
+| PUT    | `/:id`          | Update user         | Private |
+| DELETE | `/:id`          | Delete user         | Admin   |
+| PATCH  | `/:id/password` | Update password     | Private |
 
 ### System Routes
 
-| Method | Endpoint | Description |
-|---------|-----------|-------------|
-| GET | `/api/v1/health` | Health check endpoint |
+| Method | Endpoint           | Description           |
+| ------ | ------------------ | --------------------- |
+| GET    | `/api/v1/health` | Health check endpoint |
 
 ## Query Parameters
 
@@ -227,7 +228,3 @@ You can create sample data using the API endpoints or directly through MongoDB.
 5. Use process manager (PM2, forever)
 6. Set up reverse proxy (Nginx)
 7. Enable SSL/TLS
-
-## License
-
-MIT License - See LICENSE file for details.
