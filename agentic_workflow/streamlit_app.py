@@ -308,12 +308,14 @@ if prompt := st.chat_input("E.g., Enhance this underwater image and detect mines
                     tools = [EnhanceAndDetectTool()]
                     agent = create_react_agent(llm, tools)
                     
-                    full_prompt = prompt
-                    system_prompt = "\n\n[SYSTEM DIRECTIVE: You are an autonomous Agentic AI. You MUST actually execute the deepdrishti_marine_pipeline tool when asked. Do NOT just explain what the tool does. You have access to real tools, so you MUST call the function call to execute it.]"
-                    full_prompt += system_prompt
-                    
                     if current_image_path:
-                        full_prompt += f"\n[Context: The user has uploaded an image located exactly at: '{current_image_path}'. You MUST use the deepdrishti_marine_pipeline tool and pass this exact file path to it to process the image.]"
+                        # 100% BULLETPROOF EXECUTION: Bypass Groq API's flaky tool calling by executing it natively
+                        tool = EnhanceAndDetectTool()
+                        tool_result = tool._run(current_image_path)
+                        
+                        full_prompt = prompt + f"\n\n[SYSTEM DIRECTIVE: The DeepDrishti Agentic pipeline was just executed on the image. Here is the raw data output from the models: {tool_result}. Act as the AI Agent and summarize these exact findings to the user. Do NOT say you cannot run the tool, because the data is already provided. Tell them the visual results are displayed below.]"
+                    else:
+                        full_prompt = prompt + "\n\n[SYSTEM DIRECTIVE: Act as DeepDrishti AI. Ask the user to upload an image so you can run the pipeline.]"
                     
                     result = agent.invoke({"messages": [("user", full_prompt)]})
                     response = result["messages"][-1].content
