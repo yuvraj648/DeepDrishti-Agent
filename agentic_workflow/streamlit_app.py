@@ -286,13 +286,13 @@ for msg in st.session_state.messages:
         cols = st.columns(3)
         if "enhanced_image" in msg:
             with cols[0]:
-                st.image(msg["enhanced_image"], caption="1. Enhanced (FUNIE-GAN)", use_column_width=True)
+                st.image(msg["enhanced_image"], caption="1. Enhanced (FUNIE-GAN)", use_container_width=True)
         if "detected_image" in msg:
             with cols[1]:
-                st.image(msg["detected_image"], caption="2. Detected (YOLOv8)", use_column_width=True)
+                st.image(msg["detected_image"], caption="2. Detected (YOLOv8)", use_container_width=True)
         if "depth_image" in msg:
             with cols[2]:
-                st.image(msg["depth_image"], caption="3. Depth (MiDaS)", use_column_width=True)
+                st.image(msg["depth_image"], caption="3. Depth (MiDaS)", use_container_width=True)
 
 # Chat Input
 if prompt := st.chat_input("E.g., Enhance this underwater image and detect mines/fish."):
