@@ -156,18 +156,55 @@ if prompt := st.chat_input("E.g., Can you enhance this underwater image?"):
 
     # Agent Response
     with st.chat_message("assistant"):
-        if not api_key or not HAS_LANGCHAIN:
-            fallback_msg = "Please provide an OpenAI API Key in the sidebar and ensure langchain is installed to use the Agentic capabilities."
+        if not api_key:
+            # --- MOCK AGENT MODE (Free / No API Key required) ---
+            with st.spinner("Agent is thinking (Demo Mode)..."):
+                import time
+                time.sleep(1.5) # Simulate thinking time
+                
+                if current_image_path:
+                    response = (
+                        "I have analyzed your request. I recognize that you want to improve the visibility of the "
+                        "underwater image you uploaded. I am now invoking the **DeepDrishti U-Net Model** as a tool "
+                        "to enhance this image..."
+                    )
+                    st.markdown(response)
+                    
+                    # Manually run the tool since we don't have an LLM to do it
+                    tool = EnhanceImageTool()
+                    tool_result = tool._run(current_image_path)
+                    
+                    final_response = f"**Action Complete:**\n\n{tool_result}"
+                    st.markdown(final_response)
+                    
+                    # Store response
+                    msg_data = {"role": "assistant", "content": response + "\n\n" + final_response}
+                    
+                    # Show enhanced image if the tool ran
+                    if "enhanced_image_path" in st.session_state:
+                        st.image(st.session_state["enhanced_image_path"], caption="Enhanced Output")
+                        msg_data["image"] = st.session_state["enhanced_image_path"]
+                        del st.session_state["enhanced_image_path"]
+                        
+                    st.session_state.messages.append(msg_data)
+                else:
+                    demo_msg = "Hello! I am your DeepDrishti AI Agent. Please upload an image first so I can use my enhancement tools!"
+                    st.markdown(demo_msg)
+                    st.session_state.messages.append({"role": "assistant", "content": demo_msg})
+                    
+        elif not HAS_LANGCHAIN:
+            fallback_msg = "Langchain is not installed. Please check your requirements.txt."
             st.markdown(fallback_msg)
             st.session_state.messages.append({"role": "assistant", "content": fallback_msg})
+            
         else:
+            # --- REAL LLM AGENT MODE ---
             with st.spinner("Agent is thinking..."):
                 try:
                     llm = ChatOpenAI(temperature=0.1, openai_api_key=api_key, model="gpt-3.5-turbo")
                     tools = [EnhanceImageTool()]
                     agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
                     
-                    # Inject image path into prompt if available
                     full_prompt = prompt
                     if current_image_path:
                         full_prompt += f"\n[Context: User has uploaded an image located at: {current_image_path}]"
@@ -175,14 +212,12 @@ if prompt := st.chat_input("E.g., Can you enhance this underwater image?"):
                     response = agent.run(full_prompt)
                     st.markdown(response)
                     
-                    # Store response
                     msg_data = {"role": "assistant", "content": response}
                     
-                    # Show enhanced image if the tool ran
                     if "enhanced_image_path" in st.session_state:
                         st.image(st.session_state["enhanced_image_path"], caption="Enhanced Output")
                         msg_data["image"] = st.session_state["enhanced_image_path"]
-                        del st.session_state["enhanced_image_path"] # clear for next run
+                        del st.session_state["enhanced_image_path"]
                         
                     st.session_state.messages.append(msg_data)
                     
