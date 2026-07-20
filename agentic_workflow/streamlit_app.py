@@ -1,4 +1,5 @@
 import os
+import shutil
 import streamlit as st
 import tempfile
 import torch
@@ -171,18 +172,13 @@ class EnhanceAndDetectTool(BaseTool):
                             
                         img_det.save(detected_path)
                     else:
-                        import shutil
                         shutil.copy(enhanced_path, detected_path)
                 except Exception as e:
-                    import shutil
                     shutil.copy(enhanced_path, detected_path)
                 
                 # Real MiDaS Depth Map Generation (or high-quality fallback)
                 depth_path = os.path.join(temp_dir, "deepdrishti_depth.jpg")
                 try:
-                    import torch
-                    import numpy as np
-                    
                     # Try Real MiDaS
                     midas = torch.hub.load("intel-isl/MiDaS", "MiDaS_small")
                     midas.eval()
@@ -216,7 +212,6 @@ class EnhanceAndDetectTool(BaseTool):
                     Image.fromarray(heatmap).save(depth_path)
                 except Exception:
                     # High-quality pseudo depth fallback if torch hub fails
-                    import numpy as np
                     img = Image.open(enhanced_path).convert('L')
                     img = ImageEnhance.Contrast(img).enhance(3.0)
                     img = img.filter(ImageFilter.GaussianBlur(3))
@@ -243,7 +238,6 @@ class EnhanceAndDetectTool(BaseTool):
             # Mock behavior if model not loaded
             temp_dir = tempfile.gettempdir()
             enhanced_path = os.path.join(temp_dir, "deepdrishti_enhanced.jpg")
-            import shutil
             shutil.copy(image_path, enhanced_path)
             detected_path = os.path.join(temp_dir, "deepdrishti_detected.jpg")
             shutil.copy(image_path, detected_path)
