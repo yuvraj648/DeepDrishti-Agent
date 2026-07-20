@@ -3,7 +3,7 @@ import streamlit as st
 import tempfile
 import torch
 import torchvision.transforms as transforms
-from PIL import Image, ImageOps, ImageFilter
+from PIL import Image, ImageOps, ImageFilter, ImageEnhance, ImageDraw
 import numpy as np
 
 from pydantic import BaseModel, Field
@@ -148,7 +148,6 @@ class EnhanceAndDetectTool(BaseTool):
                 detected_path = os.path.join(temp_dir, "deepdrishti_detected.jpg")
                 try:
                     from ultralytics import YOLO
-                    from PIL import ImageDraw
                     yolo_model_path = os.path.join(os.path.dirname(__file__), '..', 'model', 'models', 'best.pt')
                     if os.path.exists(yolo_model_path):
                         yolo = YOLO(yolo_model_path)
@@ -183,7 +182,6 @@ class EnhanceAndDetectTool(BaseTool):
                 try:
                     import torch
                     import numpy as np
-                    from PIL import Image
                     
                     # Try Real MiDaS
                     midas = torch.hub.load("intel-isl/MiDaS", "MiDaS_small")
@@ -219,7 +217,6 @@ class EnhanceAndDetectTool(BaseTool):
                 except Exception:
                     # High-quality pseudo depth fallback if torch hub fails
                     import numpy as np
-                    from PIL import Image, ImageOps, ImageFilter, ImageEnhance
                     img = Image.open(enhanced_path).convert('L')
                     img = ImageEnhance.Contrast(img).enhance(3.0)
                     img = img.filter(ImageFilter.GaussianBlur(3))
