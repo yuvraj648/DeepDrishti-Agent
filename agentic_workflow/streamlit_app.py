@@ -3,7 +3,7 @@ import streamlit as st
 import tempfile
 import torch
 import torchvision.transforms as transforms
-from PIL import Image
+from PIL import Image, ImageOps, ImageFilter
 import numpy as np
 
 from pydantic import BaseModel, Field
@@ -173,7 +173,6 @@ class EnhanceAndDetectTool(BaseTool):
                     cv2.imwrite(depth_path, pseudo_depth)
                 except Exception:
                     try:
-                        from PIL import Image, ImageOps, ImageFilter
                         img = Image.open(enhanced_path).convert('L')
                         img = img.filter(ImageFilter.GaussianBlur(5))
                         img = ImageOps.invert(img)
