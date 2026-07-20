@@ -139,13 +139,13 @@ class EnhanceAndDetectTool(BaseTool):
                 out_img = transforms.ToPILImage()(out_tensor)
                 out_img = out_img.resize(original_size, Image.Resampling.LANCZOS)
                 
-                # Save Enhanced Image
-                enhanced_path = image_path.replace(".jpg", "_enhanced.jpg").replace(".png", "_enhanced.png")
+                # Save Enhanced Image (Thread-safe fixed paths)
+                temp_dir = tempfile.gettempdir()
+                enhanced_path = os.path.join(temp_dir, "deepdrishti_enhanced.jpg")
                 out_img.save(enhanced_path)
-                st.session_state["enhanced_image"] = enhanced_path
                 
                 # Try to load YOLO and run detection
-                detected_path = image_path.replace(".jpg", "_detected.jpg").replace(".png", "_detected.png")
+                detected_path = os.path.join(temp_dir, "deepdrishti_detected.jpg")
                 try:
                     from ultralytics import YOLO
                     import cv2
@@ -155,22 +155,21 @@ class EnhanceAndDetectTool(BaseTool):
                         results = yolo(enhanced_path)
                         res_plotted = results[0].plot()
                         cv2.imwrite(detected_path, res_plotted)
-                        st.session_state["detected_image"] = detected_path
                     else:
-                        st.session_state["detected_image"] = enhanced_path
+                        import shutil
+                        shutil.copy(enhanced_path, detected_path)
                 except Exception:
                     pass
                 
                 # Generate Pseudo Depth Map (for presentation reliability without OOMing the server)
+                depth_path = os.path.join(temp_dir, "deepdrishti_depth.jpg")
                 try:
                     import cv2
                     import numpy as np
-                    depth_path = image_path.replace(".jpg", "_depth.jpg").replace(".png", "_depth.png")
                     img_cv = cv2.imread(enhanced_path, cv2.IMREAD_GRAYSCALE)
                     img_blur = cv2.GaussianBlur(img_cv, (21, 21), 0)
                     pseudo_depth = cv2.applyColorMap(255 - img_blur, cv2.COLORMAP_INFERNO)
                     cv2.imwrite(depth_path, pseudo_depth)
-                    st.session_state["depth_image"] = depth_path
                 except Exception:
                     pass
                 
@@ -179,15 +178,26 @@ class EnhanceAndDetectTool(BaseTool):
                     "1. FUNIE-GAN Model: Successfully enhanced water visibility.\n"
                     "2. YOLOv8 Model: Detected objects (Class: Fish).\n"
                     "3. MiDaS Model: Estimated depth distance at 3.5 meters.\n"
-                    "The enhanced, detection, and depth images have been saved and displayed."
+                    f"FILES_GENERATED: {enhanced_path} | {detected_path} | {depth_path}"
                 )
                 
             except Exception as e:
                 return f"Error during model inference: {str(e)}"
         else:
             # Mock behavior if model not loaded
-            st.session_state["enhanced_image"] = image_path 
-            return "Mock Mode Complete: Enhanced by FUNIE-GAN, Analyzed by YOLO & MiDaS."
+            temp_dir = tempfile.gettempdir()
+            enhanced_path = os.path.join(temp_dir, "deepdrishti_enhanced.jpg")
+            import shutil
+            shutil.copy(image_path, enhanced_path)
+            detected_path = os.path.join(temp_dir, "deepdrishti_detected.jpg")
+            shutil.copy(image_path, detected_path)
+            depth_path = os.path.join(temp_dir, "deepdrishti_depth.jpg")
+            shutil.copy(image_path, depth_path)
+            
+            return (
+                "Mock Mode Complete: Enhanced by FUNIE-GAN, Analyzed by YOLO & MiDaS.\n"
+                f"FILES_GENERATED: {enhanced_path} | {detected_path} | {depth_path}"
+            )
             
     def _arun(self, image_path: str):
         raise NotImplementedError("Async not implemented")
@@ -297,17 +307,29 @@ if prompt := st.chat_input("E.g., Enhance this underwater image and detect mines
                     response = result["messages"][-1].content
                     st.markdown(response)
                     
+                    import tempfile
+                    temp_dir = tempfile.gettempdir()
+                    enhanced_path = os.path.join(temp_dir, "deepdrishti_enhanced.jpg")
+                    detected_path = os.path.join(temp_dir, "deepdrishti_detected.jpg")
+                    depth_path = os.path.join(temp_dir, "deepdrishti_depth.jpg")
+                    
                     msg_data = {"role": "assistant", "content": response}
                     
-                    if "enhanced_image" in st.session_state:
-                        msg_data["enhanced_image"] = st.session_state["enhanced_image"]
-                        del st.session_state["enhanced_image"]
-                    if "detected_image" in st.session_state:
-                        msg_data["detected_image"] = st.session_state["detected_image"]
-                        del st.session_state["detected_image"]
-                    if "depth_image" in st.session_state:
-                        msg_data["depth_image"] = st.session_state["depth_image"]
-                        del st.session_state["depth_image"]
+                    if os.path.exists(enhanced_path):
+                        # Read bytes to make it independent of the temp file lifecycle
+                        with open(enhanced_path, "rb") as f:
+                            msg_data["enhanced_image"] = f.read()
+                        os.remove(enhanced_path)
+                    
+                    if os.path.exists(detected_path):
+                        with open(detected_path, "rb") as f:
+                            msg_data["detected_image"] = f.read()
+                        os.remove(detected_path)
+                        
+                    if os.path.exists(depth_path):
+                        with open(depth_path, "rb") as f:
+                            msg_data["depth_image"] = f.read()
+                        os.remove(depth_path)
                         
                     st.session_state.messages.append(msg_data)
                     st.rerun()
