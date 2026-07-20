@@ -103,8 +103,8 @@ class EnhanceAndDetectInput(BaseModel):
     image_path: str = Field(description="The path to the uploaded image to enhance and analyze.")
 
 class EnhanceAndDetectTool(BaseTool):
-    name = "deepdrishti_marine_pipeline"
-    description = "Use this tool to enhance an underwater image using FUNIE-GAN, detect objects (fish, mines) using YOLO, and estimate depth using MiDaS."
+    name: str = "deepdrishti_marine_pipeline"
+    description: str = "Use this tool to enhance an underwater image using FUNIE-GAN, detect objects (fish, mines) using YOLO, and estimate depth using MiDaS."
     args_schema: type[BaseModel] = EnhanceAndDetectInput
 
     def _run(self, image_path: str) -> str:
