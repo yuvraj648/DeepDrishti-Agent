@@ -43,7 +43,7 @@ def load_model():
     if not HAS_MODEL:
         return None
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = UNet(n_channels=3, n_classes=3).to(device)
+    model = UNet().to(device)
     
     # Locate model.pth
     model_path = "model.pth"
