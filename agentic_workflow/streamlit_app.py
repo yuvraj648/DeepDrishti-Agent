@@ -148,13 +148,13 @@ class EnhanceAndDetectTool(BaseTool):
                 detected_path = os.path.join(temp_dir, "deepdrishti_detected.jpg")
                 try:
                     from ultralytics import YOLO
-                    import cv2
                     yolo_model_path = os.path.join(os.path.dirname(__file__), '..', 'model', 'models', 'best.pt')
                     if os.path.exists(yolo_model_path):
                         yolo = YOLO(yolo_model_path)
                         results = yolo(enhanced_path)
-                        res_plotted = results[0].plot()
-                        cv2.imwrite(detected_path, res_plotted)
+                        res_plotted = results[0].plot() # numpy array in BGR
+                        res_rgb = res_plotted[..., ::-1] # convert BGR to RGB
+                        Image.fromarray(res_rgb).save(detected_path)
                     else:
                         import shutil
                         shutil.copy(enhanced_path, detected_path)
@@ -162,24 +162,25 @@ class EnhanceAndDetectTool(BaseTool):
                     import shutil
                     shutil.copy(enhanced_path, detected_path)
                 
-                # Generate Pseudo Depth Map (for presentation reliability without OOMing the server)
+                # Generate Pseudo Depth Map (Heatmap style)
                 depth_path = os.path.join(temp_dir, "deepdrishti_depth.jpg")
                 try:
-                    import cv2
                     import numpy as np
-                    img_cv = cv2.imread(enhanced_path, cv2.IMREAD_GRAYSCALE)
-                    img_blur = cv2.GaussianBlur(img_cv, (21, 21), 0)
-                    pseudo_depth = cv2.applyColorMap(255 - img_blur, cv2.COLORMAP_INFERNO)
-                    cv2.imwrite(depth_path, pseudo_depth)
+                    img = Image.open(enhanced_path).convert('L')
+                    img = img.filter(ImageFilter.GaussianBlur(5))
+                    img = ImageOps.invert(img)
+                    
+                    # Apply a custom colorful heatmap using purely numpy
+                    arr = np.array(img)
+                    heatmap = np.zeros((arr.shape[0], arr.shape[1], 3), dtype=np.uint8)
+                    heatmap[:, :, 0] = arr  # Red = closer
+                    heatmap[:, :, 1] = arr // 2  # Green
+                    heatmap[:, :, 2] = 255 - arr # Blue = farther
+                    
+                    Image.fromarray(heatmap).save(depth_path)
                 except Exception:
-                    try:
-                        img = Image.open(enhanced_path).convert('L')
-                        img = img.filter(ImageFilter.GaussianBlur(5))
-                        img = ImageOps.invert(img)
-                        img.save(depth_path)
-                    except Exception:
-                        import shutil
-                        shutil.copy(enhanced_path, depth_path)
+                    import shutil
+                    shutil.copy(enhanced_path, depth_path)
                 
                 return (
                     "Success! DeepDrishti Pipeline Complete:\n"
