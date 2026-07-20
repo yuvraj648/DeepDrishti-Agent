@@ -241,7 +241,7 @@ if prompt := st.chat_input("E.g., Enhance this underwater image and detect mines
             with st.spinner("Agent is thinking..."):
                 try:
                     # Switch to Groq! It's free and extremely fast.
-                    llm = ChatGroq(temperature=0.1, groq_api_key=api_key, model_name="llama3-8b-8192")
+                    llm = ChatGroq(temperature=0.1, groq_api_key=api_key, model_name="llama-3.3-70b-versatile")
                     tools = [EnhanceAndDetectTool()]
                     agent = create_react_agent(llm, tools)
                     
