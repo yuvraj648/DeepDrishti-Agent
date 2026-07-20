@@ -9,9 +9,9 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 # Try to import langchain and groq
-from langchain.agents import initialize_agent, AgentType
 from langchain_groq import ChatGroq
 from langchain.tools import BaseTool
+from langgraph.prebuilt import create_react_agent
 HAS_LANGCHAIN = True
 
 import sys
@@ -243,13 +243,14 @@ if prompt := st.chat_input("E.g., Enhance this underwater image and detect mines
                     # Switch to Groq! It's free and extremely fast.
                     llm = ChatGroq(temperature=0.1, groq_api_key=api_key, model_name="mixtral-8x7b-32768")
                     tools = [EnhanceAndDetectTool()]
-                    agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
+                    agent = create_react_agent(llm, tools)
                     
                     full_prompt = prompt
                     if current_image_path:
                         full_prompt += f"\n[Context: User uploaded an image. Run the deepdrishti_marine_pipeline tool to enhance it and detect objects.]"
                     
-                    response = agent.run(full_prompt)
+                    result = agent.invoke({"messages": [("user", full_prompt)]})
+                    response = result["messages"][-1].content
                     st.markdown(response)
                     
                     msg_data = {"role": "assistant", "content": response}
