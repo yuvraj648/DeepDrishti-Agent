@@ -306,7 +306,8 @@ if prompt := st.chat_input("E.g., Enhance this underwater image and detect mines
                     # Switch to Groq! It's free and extremely fast.
                     llm = ChatGroq(temperature=0.1, groq_api_key=api_key, model_name="llama-3.3-70b-versatile")
                     tools = [EnhanceAndDetectTool()]
-                    agent = create_react_agent(llm, tools)
+                    system_prompt = "You are an autonomous Agentic AI. You MUST actually execute the deepdrishti_marine_pipeline tool when asked. Do NOT just explain what the tool does. You have access to real tools, so you MUST call the function call to execute it."
+                    agent = create_react_agent(llm, tools, state_modifier=system_prompt)
                     
                     full_prompt = prompt
                     if current_image_path:
