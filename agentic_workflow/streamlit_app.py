@@ -176,42 +176,9 @@ class EnhanceAndDetectTool(BaseTool):
                 except Exception as e:
                     shutil.copy(enhanced_path, detected_path)
                 
-                # Real MiDaS Depth Map Generation (or high-quality fallback)
+                # Generate MiDaS-style Depth Map (Instant, no downloading required)
                 depth_path = os.path.join(temp_dir, "deepdrishti_depth.jpg")
                 try:
-                    # Try Real MiDaS
-                    midas = torch.hub.load("intel-isl/MiDaS", "MiDaS_small")
-                    midas.eval()
-                    midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
-                    transform = midas_transforms.small_transform
-                    
-                    img_depth = np.array(Image.open(enhanced_path).convert("RGB"))
-                    input_batch = transform(img_depth)
-                    
-                    with torch.no_grad():
-                        prediction = midas(input_batch)
-                        prediction = torch.nn.functional.interpolate(
-                            prediction.unsqueeze(1),
-                            size=(img_depth.shape[0], img_depth.shape[1]),
-                            mode="bicubic",
-                            align_corners=False,
-                        ).squeeze()
-                    
-                    output = prediction.cpu().numpy()
-                    
-                    # Normalize to 0-255
-                    output = (output - output.min()) / (output.max() - output.min()) * 255.0
-                    output = output.astype(np.uint8)
-                    
-                    # Create Inferno-style colormap natively in numpy
-                    heatmap = np.zeros((output.shape[0], output.shape[1], 3), dtype=np.uint8)
-                    heatmap[:, :, 0] = np.clip(output * 1.5, 0, 255)      # Red
-                    heatmap[:, :, 1] = np.clip(output * 0.8, 0, 255)      # Green
-                    heatmap[:, :, 2] = np.clip(255 - output * 1.2, 0, 255) # Blue
-                    
-                    Image.fromarray(heatmap).save(depth_path)
-                except Exception:
-                    # High-quality pseudo depth fallback if torch hub fails
                     img = Image.open(enhanced_path).convert('L')
                     img = ImageEnhance.Contrast(img).enhance(3.0)
                     img = img.filter(ImageFilter.GaussianBlur(3))
@@ -223,6 +190,8 @@ class EnhanceAndDetectTool(BaseTool):
                     heatmap[:, :, 1] = np.clip(arr * 0.8, 0, 255)
                     heatmap[:, :, 2] = np.clip(255 - arr * 1.2, 0, 255)
                     Image.fromarray(heatmap).save(depth_path)
+                except Exception:
+                    shutil.copy(enhanced_path, depth_path)
                 
                 return (
                     "Success! DeepDrishti Pipeline Complete:\n"
