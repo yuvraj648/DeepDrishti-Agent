@@ -247,7 +247,7 @@ if prompt := st.chat_input("E.g., Enhance this underwater image and detect mines
                     
                     full_prompt = prompt
                     if current_image_path:
-                        full_prompt += f"\n[Context: User uploaded an image. Run the deepdrishti_marine_pipeline tool to enhance it and detect objects.]"
+                        full_prompt += f"\n[Context: The user has uploaded an image located exactly at: '{current_image_path}'. You MUST use the deepdrishti_marine_pipeline tool and pass this exact file path to it to process the image.]"
                     
                     result = agent.invoke({"messages": [("user", full_prompt)]})
                     response = result["messages"][-1].content
