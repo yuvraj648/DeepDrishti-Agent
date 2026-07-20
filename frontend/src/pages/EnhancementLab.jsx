@@ -27,6 +27,8 @@ const EnhancementLab = () => {
   const [viewMode, setViewMode] = useState('rgb');
   const [sliderPosition, setSliderPosition] = useState(50);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isVideoPlaying, setIsVideoPlaying] = useState(false);
+  const [videoTimestamp, setVideoTimestamp] = useState(0);
   const [uploadedImage, setUploadedImage] = useState(null);
   const [enhancedImage, setEnhancedImage] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
@@ -34,8 +36,12 @@ const EnhancementLab = () => {
   const [qualityMetrics, setQualityMetrics] = useState(PLACEHOLDER_METRICS);
   const [improvements, setImprovements] = useState(PLACEHOLDER_IMPROVEMENTS);
   const [detectionResults, setDetectionResults] = useState([]);
+  const [uploadedVideo, setUploadedVideo] = useState(null);
   const [lastProcessingMs, setLastProcessingMs] = useState(null);
+  const [modelDetections, setModelDetections] = useState([]);
+  const [modelImageDims, setModelImageDims] = useState({ width: null, height: null });
   const fileInputRef = useRef(null);
+  const videoRef = useRef(null);
 
   // Add styles for comparison slider
   React.useEffect(() => {
@@ -87,88 +93,159 @@ const EnhancementLab = () => {
 
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
-    if (file && file.type.startsWith('image/')) {
+    if (file && (file.type.startsWith('image/') || file.type.startsWith('video/'))) {
       setSelectedFile(file);
       setError(null);
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        setUploadedImage(e.target.result);
-        setEnhancedImage(null);
-        setQualityMetrics(PLACEHOLDER_METRICS);
-        setImprovements(PLACEHOLDER_IMPROVEMENTS);
-        setDetectionResults([]);
-        setLastProcessingMs(null);
-      };
-      reader.readAsDataURL(file);
+      
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          setUploadedImage(e.target.result);
+          setUploadedVideo(null);
+          resetState();
+        };
+        reader.readAsDataURL(file);
+      } else {
+        // Handle video preview
+        const url = URL.createObjectURL(file);
+        setUploadedVideo(url);
+        setUploadedImage(null);
+        resetState();
+      }
     } else {
-      setError('Please select a valid image file');
+      setError('Please select a valid image or video file');
     }
+  };
+
+  const resetState = () => {
+    setEnhancedImage(null);
+    setQualityMetrics(PLACEHOLDER_METRICS);
+    setImprovements(PLACEHOLDER_IMPROVEMENTS);
+    setDetectionResults([]);
+    setLastProcessingMs(null);
+    setModelDetections([]);
+    setModelImageDims({ width: null, height: null });
   };
 
   const handleRunEnhancement = async () => {
     if (!selectedFile && !uploadedImage) {
-      setError('Please upload an image first for AI enhancement');
+      setError('Please upload an image or video first for AI enhancement');
       return;
     }
 
-    if (!selectedFile) {
-      setError('Please upload an image first');
+    const isVideo = selectedFile?.type.startsWith('video/') || uploadedVideo;
+
+    if (isVideo && videoRef.current) {
+      // For videos, we'll start a loop that captures frames periodically
+      setIsVideoPlaying(true);
+      videoRef.current.play();
+      processVideoFrame();
       return;
     }
+
+    await performEnhancement();
+  };
+
+  const performEnhancement = async (fileToUse = selectedFile) => {
+    if (!fileToUse) return;
 
     try {
       setIsProcessing(true);
       setError(null);
 
-      // Create FormData
       const formData = new FormData();
-      formData.append('image', selectedFile);
+      formData.append('file', fileToUse);
       formData.append('enhancementType', enhancementMode.toLowerCase().replace(' ', '_'));
 
-      console.log('Sending enhancement request...');
-
-      // Send POST request to AI enhancement backend
       const response = await axios.post(`${API_BASE.replace(/\/$/, '')}/ai-enhance`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+        headers: { 'Content-Type': 'multipart/form-data' },
         timeout: 60000,
       });
 
       const payload = response.data?.data || {};
-      const enhancedImagePath = payload.enhancedImage;
-
-      const enhancedImageUrl = enhancedImagePath.startsWith('http')
-        ? enhancedImagePath
-        : `${FLASK_STATIC_ORIGIN}${enhancedImagePath.startsWith('/') ? '' : '/'}${enhancedImagePath}`;
-
-      setEnhancedImage(enhancedImageUrl);
-      setLastProcessingMs(payload.processingTime ?? null);
-
-      if (Array.isArray(payload.qualityMetrics) && payload.qualityMetrics.length) {
-        setQualityMetrics(payload.qualityMetrics);
-      }
-      if (Array.isArray(payload.improvements) && payload.improvements.length) {
-        setImprovements(payload.improvements);
-      }
-      setDetectionResults(Array.isArray(payload.detectionResults) ? payload.detectionResults : []);
+      updateUIWithResult(payload);
 
     } catch (err) {
       console.error('🤖 AI Enhancement error:', err);
-      
-      // Handle specific AI service errors
-      if (err.code === 'ECONNABORTED') {
-        setError('AI enhancement request timed out. Please try again.');
-      } else if (err.response?.status === 503) {
-        setError('AI enhancement service is not available. Please ensure the Flask AI server is running.');
-      } else if (err.response?.status === 408) {
-        setError('AI enhancement request timed out. Please try again.');
-      } else {
-        setError(err.response?.data?.message || 'Failed to enhance image with AI');
-      }
+      setError(err.response?.data?.message || 'Failed to enhance with AI');
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const updateUIWithResult = (payload) => {
+    const enhancedImagePath = payload.enhancedImage;
+    const enhancedImageUrl = enhancedImagePath.startsWith('http')
+      ? enhancedImagePath
+      : `${FLASK_STATIC_ORIGIN}${enhancedImagePath.startsWith('/') ? '' : '/'}${enhancedImagePath}`;
+
+    setEnhancedImage(enhancedImageUrl);
+    setLastProcessingMs(payload.processingTime ?? null);
+
+    const detections = Array.isArray(payload.detections) ? payload.detections : [];
+    setModelDetections(detections);
+    setModelImageDims({
+      width: typeof payload.imageWidth === 'number' ? payload.imageWidth : null,
+      height: typeof payload.imageHeight === 'number' ? payload.imageHeight : null,
+    });
+
+    if (Array.isArray(payload.qualityMetrics)) setQualityMetrics(payload.qualityMetrics);
+    if (Array.isArray(payload.improvements)) setImprovements(payload.improvements);
+
+    setDetectionResults(
+      detections.map((d, idx) => ({
+        id: `${idx}`,
+        name: d.class || d.raw_class || 'unknown',
+        type: d.status || 'NEUTRAL',
+        confidence: typeof d.confidence === 'number' ? `${Math.round(d.confidence * 100)}%` : '—',
+        distance_m: typeof d.distance_m === 'number' ? d.distance_m : null,
+        bbox: Array.isArray(d.bbox) ? d.bbox : null,
+      }))
+    );
+  };
+
+  const processVideoFrame = async () => {
+    if (!videoRef.current || videoRef.current.paused || videoRef.current.ended) {
+      setIsVideoPlaying(false);
+      return;
+    }
+
+    setVideoTimestamp(videoRef.current.currentTime);
+
+    // Capture current frame from video to canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = videoRef.current.videoWidth;
+    canvas.height = videoRef.current.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+
+    // Convert canvas to blob and send to API
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      
+      const frameFile = new File([blob], `frame_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      
+      try {
+        const formData = new FormData();
+        formData.append('file', frameFile);
+        formData.append('enhancementType', enhancementMode.toLowerCase().replace(' ', '_'));
+
+        const response = await axios.post(`${API_BASE.replace(/\/$/, '')}/ai-enhance`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+
+        if (response.data?.success) {
+          updateUIWithResult(response.data.data);
+        }
+      } catch (err) {
+        console.error('Video frame processing error:', err);
+      }
+
+      // Schedule next frame if still playing
+      if (videoRef.current && !videoRef.current.paused) {
+        setTimeout(processVideoFrame, 1000); // Process 1 frame per second to avoid overloading
+      }
+    }, 'image/jpeg', 0.8);
   };
 
   const handleSliderMouseMove = (e) => {
@@ -179,6 +256,7 @@ const EnhancementLab = () => {
   };
 
   const currentOriginalImage = uploadedImage || defaultOriginalImage;
+  const currentOriginalVideo = uploadedVideo;
   const currentEnhancedImage = enhancedImage;
 
   const enhancedVisualFilter =
@@ -251,13 +329,13 @@ const EnhancementLab = () => {
                 >
                   <span className="material-symbols-outlined text-primary text-4xl">upload_file</span>
                   <div className="text-center">
-                    <p className="text-xs font-bold uppercase tracking-widest text-slate-100">Drop RAW Frame</p>
-                    <p className="text-[10px] text-slate-500 uppercase mt-1">TIFF, PNG, RAW (MAX 50MB)</p>
+                    <p className="text-xs font-bold uppercase tracking-widest text-slate-100">Drop Media File</p>
+                    <p className="text-[10px] text-slate-500 uppercase mt-1">Images, Videos (MAX 50MB)</p>
                   </div>
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="image/*"
+                    accept="image/*,video/*"
                     onChange={handleFileUpload}
                     className="hidden"
                   />
@@ -287,10 +365,10 @@ const EnhancementLab = () => {
                 
                 <button 
                   onClick={handleRunEnhancement}
-                  disabled={isProcessing || (!selectedFile && !uploadedImage)}
+                  disabled={isProcessing || isVideoPlaying || (!selectedFile && !uploadedImage)}
                   className="w-full h-11 bg-primary text-background-dark font-bold text-xs uppercase tracking-widest hover:brightness-110 transition-all rounded disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {isProcessing ? 'Processing...' : 'Run Enhancement'}
+                  {isProcessing ? 'Processing...' : isVideoPlaying ? 'Video Analysis Live' : 'Run Enhancement'}
                 </button>
               <div className="space-y-4">
                 <div className="space-y-2">
@@ -352,63 +430,132 @@ const EnhancementLab = () => {
               </div>
             </div>
 
-            {/* Comparison Slider */}
-            <div
-              id="enhancement-comparison-panel"
-              className="flex-1 comparison-slider rounded border border-border-muted bg-slate-900"
-              role="region"
-              aria-label="Before and after enhancement comparison"
-            >
-              <div 
-                className="absolute inset-0 bg-cover bg-center opacity-50 grayscale"
-                style={{ backgroundImage: `url(${currentOriginalImage})` }}
-              >
-                <div className="absolute top-4 left-4 bg-background-dark/80 px-2 py-1 rounded border border-border-muted">
-                  <span className="text-[10px] font-mono uppercase text-slate-400">Original Frame</span>
+            {/* Panels: Original | Enhanced | Detected */}
+            <div className="flex-1 flex flex-col gap-4 overflow-y-auto pr-2">
+              {/* Original Panel */}
+              <div className="relative rounded border border-border-muted bg-slate-900 overflow-hidden aspect-video shrink-0">
+                <div className="absolute top-3 left-3 bg-background-dark/80 px-2 py-1 rounded border border-border-muted z-20">
+                  <span className="text-[10px] font-mono uppercase text-slate-300">Original</span>
                 </div>
-              </div>
-              <div 
-                className="absolute inset-0 bg-cover bg-center transition-[filter] duration-200"
-                style={{ 
-                  backgroundImage: rightSideSource ? `url(${rightSideSource})` : 'none',
-                  backgroundColor: rightSideSource ? 'transparent' : '#1a2332',
-                  clipPath: `inset(0 0 0 ${100 - sliderPosition}%)`,
-                  filter: rightSideSource ? rightSideFilter : 'none',
-                }}
-              >
-                {!rightSideSource && (
+                <div className="absolute top-3 right-3 bg-background-dark/80 px-2 py-1 rounded border border-border-muted z-20">
+                  <span className="text-[10px] font-mono text-primary">{videoTimestamp.toFixed(2)}s</span>
+                </div>
+                {uploadedVideo ? (
+                  <video
+                    ref={videoRef}
+                    src={uploadedVideo}
+                    className="w-full h-full object-cover"
+                    autoPlay
+                    muted
+                    loop
+                  />
+                ) : currentOriginalImage ? (
+                  <img
+                    src={currentOriginalImage}
+                    alt="Original input"
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
                   <div className="absolute inset-0 flex items-center justify-center">
                     <div className="text-center">
                       <span className="material-symbols-outlined text-4xl text-slate-600 mb-2">image_not_supported</span>
-                      <p className="text-slate-500 text-sm">Upload an image to compare and enhance</p>
+                      <p className="text-slate-500 text-sm">Upload an image/video</p>
                     </div>
                   </div>
                 )}
-                <div className="absolute top-4 right-4 bg-primary/20 px-2 py-1 rounded border border-primary/40 backdrop-blur-sm">
-                  <span className="text-[10px] font-mono uppercase text-primary">
-                    {currentEnhancedImage ? 'Enhanced' : 'Preview'}{' '}
-                    {viewMode === 'rgb' ? '(RGB)' : viewMode === 'contrast' ? '(contrast map)' : '(visibility)'}
-                  </span>
-                </div>
               </div>
-              <div 
-                className="slider-divider"
-                style={{ left: `${sliderPosition}%` }}
-                onMouseDown={(e) => {
-                  const handleMouseMove = (e) => handleSliderMouseMove(e);
-                  const handleMouseUp = () => {
-                    document.removeEventListener('mousemove', handleMouseMove);
-                    document.removeEventListener('mouseup', handleMouseUp);
-                  };
-                  document.addEventListener('mousemove', handleMouseMove);
-                  document.addEventListener('mouseup', handleMouseUp);
-                }}
-              />
-              <div 
-                className="slider-handle"
-                style={{ left: `${sliderPosition}%` }}
-              >
-                <span className="material-symbols-outlined text-background-dark font-bold text-xl">unfold_more</span>
+
+              {/* Enhanced Panel */}
+              <div className="relative rounded border border-border-muted bg-slate-900 overflow-hidden aspect-video shrink-0">
+                <div className="absolute top-3 left-3 bg-primary/15 px-2 py-1 rounded border border-primary/30 z-20">
+                  <span className="text-[10px] font-mono uppercase text-primary">Enhanced</span>
+                </div>
+                {currentEnhancedImage ? (
+                  <img
+                    src={currentEnhancedImage}
+                    alt="Enhanced output"
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="text-center">
+                      <span className="material-symbols-outlined text-4xl text-slate-600 mb-2">auto_fix_high</span>
+                      <p className="text-slate-500 text-sm">Run enhancement to generate output</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Detected Panel */}
+              <div className="relative rounded border border-border-muted bg-slate-900 overflow-hidden aspect-video shrink-0">
+                <div className="absolute top-3 left-3 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/30 z-20">
+                  <span className="text-[10px] font-mono uppercase text-emerald-300">Detected</span>
+                </div>
+
+                {currentEnhancedImage ? (
+                  <>
+                    <img
+                      src={currentEnhancedImage}
+                      alt="Detected overlay"
+                      className="w-full h-full object-cover"
+                    />
+
+                    {Array.isArray(modelDetections) && modelDetections.length > 0 && (
+                      <div className="absolute inset-0">
+                        {modelDetections.map((d, idx) => {
+                          const bbox = Array.isArray(d.bbox) ? d.bbox : null;
+                          const w = modelImageDims?.width;
+                          const h = modelImageDims?.height;
+                          if (!bbox || bbox.length !== 4 || !w || !h) return null;
+
+                          const [x1, y1, x2, y2] = bbox;
+                          const left = (x1 / w) * 100;
+                          const top = (y1 / h) * 100;
+                          const width = ((x2 - x1) / w) * 100;
+                          const height = ((y2 - y1) / h) * 100;
+
+                          const status = String(d.status || '').toUpperCase() || 'NEUTRAL';
+                          const borderClass =
+                            status === 'DANGER'
+                              ? 'border-red-500/90'
+                              : status === 'SAFE'
+                                ? 'border-emerald-400/90'
+                                : 'border-yellow-400/90';
+
+                          const label = `${d.class || d.raw_class || 'unknown'} • ${status}${typeof d.distance_m === 'number' ? ` • ${d.distance_m}m` : ''}`;
+
+                          return (
+                            <div
+                              key={`${idx}`}
+                              className={`absolute border-2 ${borderClass}`}
+                              style={{ left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%` }}
+                            >
+                              <div className="absolute -top-6 left-0 bg-background-dark/85 border border-border-muted px-2 py-0.5 text-[10px] font-mono text-slate-100 whitespace-nowrap">
+                                {label}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {(!Array.isArray(modelDetections) || modelDetections.length === 0) && (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="text-center">
+                          <span className="material-symbols-outlined text-4xl text-slate-600 mb-2">travel_explore</span>
+                          <p className="text-slate-500 text-sm">No objects detected</p>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="text-center">
+                      <span className="material-symbols-outlined text-4xl text-slate-600 mb-2">query_stats</span>
+                      <p className="text-slate-500 text-sm">Run enhancement to detect objects</p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -515,11 +662,23 @@ const EnhancementLab = () => {
                   detectionResults.map((result, index) => (
                     <div
                       key={index}
-                      className="flex items-center gap-3 bg-background-dark/40 border border-border-muted p-2 rounded hover:border-primary/50 transition-colors"
+                      className={`flex items-center gap-3 bg-background-dark/40 border p-2 rounded hover:border-primary/50 transition-colors ${
+                        result.type === 'DANGER' ? 'border-red-500/30' : 'border-border-muted'
+                      }`}
                     >
                       <div className="flex-1">
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-100">{result.name}</p>
-                        <p className="text-[9px] text-slate-500 uppercase">{result.type}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-100">{result.name}</p>
+                          {result.type === 'DANGER' && (
+                            <span className="text-[8px] px-1 bg-red-500/20 text-red-500 border border-red-500/30 rounded">THREAT</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <p className="text-[9px] text-slate-500 uppercase">{result.type}</p>
+                          {result.distance_m != null && (
+                            <span className="text-[9px] text-primary font-mono font-bold">DIST: {result.distance_m.toFixed(1)}M</span>
+                          )}
+                        </div>
                       </div>
                       <div className="text-xs font-mono text-primary font-bold">{result.confidence}</div>
                     </div>

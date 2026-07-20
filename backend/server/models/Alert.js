@@ -64,12 +64,10 @@ const alertSchema = new mongoose.Schema({
       type: String,
       trim: true
     },
-    boundingBox: {
-      x: Number,
-      y: Number,
-      width: Number,
-      height: Number
-    },
+    boundingBox: mongoose.Schema.Types.Mixed,
+    distance_m: Number,
+    modelsUsed: [String],
+    snapshotPath: String,
     frameTimestamp: Date,
     processingTime: Number
   },

@@ -38,6 +38,10 @@ const Surveillance = () => {
   const videoRef = useRef(null);
   const viewportRef = useRef(null);
 
+  // Constants for coordinate mapping
+  const W_REF = 1280;
+  const H_REF = 720;
+
   const selectedFeedId = searchParams.get('feed');
 
   useEffect(() => {
@@ -123,7 +127,7 @@ const Surveillance = () => {
 
   useEffect(() => {
     refreshAiAnalysis();
-    const t = setInterval(refreshAiAnalysis, 15000);
+    const t = setInterval(refreshAiAnalysis, 5000); // Increased frequency for real-time feel
     return () => clearInterval(t);
   }, [refreshAiAnalysis]);
 
@@ -397,41 +401,61 @@ const Surveillance = () => {
                 </div>
               </div>
 
-              {recentAlerts.slice(0, 3).map((alert, index) => (
-                <div
-                  key={alert._id}
-                  className={`pointer-events-none absolute cursor-crosshair border-2 group ${
-                    alert.severity === 'critical'
-                      ? 'border-red-500'
-                      : alert.severity === 'high'
-                        ? 'border-yellow-500'
-                        : 'border-primary/50'
-                  }`}
-                  style={{
-                    top: `${20 + index * 15}%`,
-                    left: `${30 + index * 10}%`,
-                    width: alert.severity === 'critical' ? '8rem' : '6rem',
-                    height: alert.severity === 'critical' ? '6rem' : '4rem',
-                  }}
-                >
+              {recentAlerts.map((alert) => {
+                if (!alert.detectionData?.boundingBox) return null;
+                const bbox = alert.detectionData.boundingBox;
+                // Normalize bbox if it's in pixel coordinates (YOLO usually returns pixels)
+                // If it's already normalized [0-1], use as is.
+                // Assuming [x1, y1, x2, y2] from YOLO
+                const x1 = bbox[0] / W_REF || 0;
+                const y1 = bbox[1] / H_REF || 0;
+                const x2 = bbox[2] / W_REF || 1;
+                const y2 = bbox[3] / H_REF || 1;
+                
+                return (
                   <div
-                    className={`absolute -top-6 left-0 px-1.5 py-0.5 ${
+                    key={alert._id}
+                    className={`pointer-events-none absolute border-2 group transition-all duration-500 ${
                       alert.severity === 'critical'
-                        ? 'bg-red-500'
+                        ? 'border-red-500 bg-red-500/10'
                         : alert.severity === 'high'
-                          ? 'bg-yellow-500'
-                          : 'bg-primary'
+                          ? 'border-yellow-500 bg-yellow-500/10'
+                          : 'border-primary/50 bg-primary/5'
                     }`}
+                    style={{
+                      top: `${(bbox[1] / 720) * 100}%`,
+                      left: `${(bbox[0] / 1280) * 100}%`,
+                      width: `${((bbox[2] - bbox[0]) / 1280) * 100}%`,
+                      height: `${((bbox[3] - bbox[1]) / 720) * 100}%`,
+                    }}
                   >
-                    <span className="text-[10px] font-bold text-background-dark">
-                      {alert.detectionData?.detectedObject?.toUpperCase() || 'DETECTED'}
-                    </span>
-                    <span className="ml-1">
-                      {alert.confidence ? `${(alert.confidence * 100).toFixed(0)}%` : ''}
-                    </span>
+                    <div
+                      className={`absolute -top-6 left-0 px-1.5 py-0.5 whitespace-nowrap ${
+                        alert.severity === 'critical'
+                          ? 'bg-red-500'
+                          : alert.severity === 'high'
+                            ? 'bg-yellow-500'
+                            : 'bg-primary'
+                      }`}
+                    >
+                      <span className="text-[10px] font-bold text-background-dark uppercase">
+                        {alert.detectionData?.detectedObject || 'OBJECT'}
+                      </span>
+                      <span className="ml-2 text-[10px] font-mono text-background-dark">
+                        {alert.confidence ? `${(alert.confidence * 100).toFixed(0)}%` : ''}
+                      </span>
+                      {alert.detectionData?.distance_m && (
+                        <span className="ml-2 border-l border-background-dark/30 pl-2 text-[10px] font-bold text-background-dark">
+                          {alert.detectionData.distance_m}m
+                        </span>
+                      )}
+                      <span className="ml-2 border-l border-background-dark/30 pl-2 text-[10px] font-mono text-background-dark">
+                        {alert.detectionData?.frameTimestamp ? new Date(alert.detectionData.frameTimestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'}) : ''}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </main>
 
@@ -503,10 +527,23 @@ const Surveillance = () => {
                     {detectedList.map((obj) => (
                       <div
                         key={obj.id}
-                        className="flex items-center justify-between border border-primary/10 p-2 hover:bg-primary/5"
+                        className="flex flex-col border border-primary/10 p-2 hover:bg-primary/5 gap-1"
                       >
-                        <span className="text-xs">{obj.name}</span>
-                        <span className="font-mono text-xs">{obj.confidencePct}%</span>
+                        <div className="flex items-center justify-between">
+                          <span className={`text-xs font-bold ${obj.name.includes('MINE') ? 'text-red-500' : 'text-slate-100'}`}>
+                            {obj.name}
+                          </span>
+                          <span className="font-mono text-xs text-primary">{obj.confidencePct}%</span>
+                        </div>
+                        <div className="flex justify-between items-center text-[9px] text-slate-500 font-mono">
+                          <span>Dist: {obj.distance_m || '—'}m</span>
+                          <span>Time: {obj.timestamp ? new Date(obj.timestamp).toLocaleTimeString() : '—'}</span>
+                        </div>
+                        {obj.models && (
+                          <div className="text-[8px] text-slate-600 uppercase tracking-tighter mt-1 border-t border-primary/5 pt-1">
+                            Analyzed by: {obj.models.join(' + ')}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

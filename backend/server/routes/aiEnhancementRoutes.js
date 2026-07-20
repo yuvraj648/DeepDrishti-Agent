@@ -4,13 +4,8 @@ const axios = require('axios');
 const FormData = require('form-data');
 const fs = require('fs');
 const Enhancement = require('../models/Enhancement');
+const Detection = require('../models/Detection');
 const { buildEnhancementLabMetrics } = require('../utils/enhancementLabMetrics');
-const { protect } = require('../middleware/authMiddleware');
-const {
-  authorize,
-  authorizeAllRegistered,
-  blockAnalystWrites,
-} = require('../middleware/authorize');
 
 const router = express.Router();
 
@@ -21,10 +16,10 @@ const upload = multer({
     fileSize: 10 * 1024 * 1024, // 10MB limit
   },
   fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
+    if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
       cb(null, true);
     } else {
-      cb(new Error('Only image files are allowed'), false);
+      cb(new Error('Only image and video files are allowed'), false);
     }
   }
 });
@@ -35,7 +30,7 @@ const FLASK_SERVER_URL = 'http://localhost:5001';
 // @desc    AI Enhancement via Flask API
 // @route   POST /api/v1/ai-enhance
 // @access  Public
-const aiEnhanceImage = async (req, res, next) => {
+const aiEnhanceMedia = async (req, res, next) => {
   try {
     console.log('🤖 AI Enhancement request received');
     console.log('📁 File received:', req.file);
@@ -46,30 +41,35 @@ const aiEnhanceImage = async (req, res, next) => {
       console.log('❌ No file uploaded');
       return res.status(400).json({
         status: 'error',
-        message: 'No image file uploaded',
+        message: 'No media file uploaded',
         timestamp: new Date().toISOString()
       });
     }
 
     const startTime = Date.now();
+    const isVideo = req.file.mimetype.startsWith('video/');
 
     // Create FormData for Flask API
     const formData = new FormData();
     
     // Read the uploaded file and append to FormData
     const fileStream = fs.createReadStream(req.file.path);
-    formData.append('image', fileStream, {
+    
+    // If it's a video, Flask expects it in a certain field or handles it differently
+    // Based on app.py, it uses 'image' or 'file' field for both.
+    formData.append('file', fileStream, {
       filename: req.file.originalname,
       contentType: req.file.mimetype
     });
 
-    console.log('🔄 Sending image to Flask AI server...');
+    console.log(`🔄 Sending ${isVideo ? 'video' : 'image'} to Flask AI server...`);
     console.log("➡ Sending request to Flask...");
 
     // Send request to Flask AI enhancement server
-    const flaskResponse = await axios.post('http://localhost:5001/enhance', formData, {
+    // We use /pipeline which handles both images and videos (by extracting a frame)
+    const flaskResponse = await axios.post('http://localhost:5001/pipeline', formData, {
       headers: formData.getHeaders(),
-      timeout: 30000 // 30 second timeout
+      timeout: 60000 // Increase timeout for videos
     });
 
     console.log("⬅ Response from Flask:", flaskResponse.data);
@@ -111,11 +111,53 @@ const aiEnhanceImage = async (req, res, next) => {
     }
 
     const flaskData = flaskResponse.data.data;
+    const flaskDetections = Array.isArray(flaskData.detections) ? flaskData.detections : [];
     const labMetrics = buildEnhancementLabMetrics(
       flaskData.processing_time_ms,
       uploadedSizeBytes,
-      flaskData.lab || flaskData.quality || {}
+      {
+        ...flaskData.lab,
+        ...flaskData.quality,
+        psnr: flaskData.metrics?.psnr,
+        ssim: flaskData.metrics?.ssim,
+        uiqm: flaskData.metrics?.uiqm,
+        detections: flaskData.detections
+      }
     );
+
+    try {
+      if (flaskDetections.length) {
+        const toThreatStatus = (d) => {
+          const s = String(d?.status || '').toUpperCase();
+          if (s === 'DANGER') return 'DANGER';
+          if (s === 'SAFE') return 'SAFE';
+          if (s === 'CLEAR') return 'CLEAR';
+          return 'NEUTRAL';
+        };
+
+        await Detection.insertMany(
+          flaskDetections.map((d) => ({
+            id: `DET-LAB-${Date.now()}-${Math.random().toString(36).slice(2, 9).toUpperCase()}`,
+            cameraSource: 'LAB_UPLOAD',
+            objectDetected: d.class || d.raw_class || 'unknown',
+            confidence: Math.min(100, Math.max(0, Math.round((d.confidence ?? 0) * 100))),
+            timestamp: new Date(),
+            status: 'investigating',
+            threatStatus: toThreatStatus(d),
+            distance_m: typeof d.distance_m === 'number' ? d.distance_m : null,
+            modelsUsed: Array.isArray(d.models_used) ? d.models_used : null,
+            boundingBox: d.bbox || null,
+            snapshotPath: flaskData.enhanced_image_path || null,
+            enhancedImage: flaskData.enhanced_image_path || null,
+            processingTime: flaskData.processing_time_ms || 0,
+            aiModel: 'FUNIE-GAN + YOLOv8 + MiDaS',
+          })),
+          { ordered: false }
+        );
+      }
+    } catch (detPersistErr) {
+      console.warn('⚠️ Could not persist detection records for Enhancement Lab:', detPersistErr.message);
+    }
 
     // Return response (includes scientific metrics for Enhancement Lab UI)
     res.status(200).json({
@@ -126,6 +168,9 @@ const aiEnhanceImage = async (req, res, next) => {
         originalFilename: originalName,
         enhancedFilename: flaskData.output_filename,
         modelDevice: flaskData.model_device,
+        detections: flaskDetections,
+        imageWidth: typeof flaskData.image_width === 'number' ? flaskData.image_width : null,
+        imageHeight: typeof flaskData.image_height === 'number' ? flaskData.image_height : null,
         totalRequestTime: processingTime,
         flaskProcessingTime: flaskData.processing_time_ms,
         nodeProcessingTime: processingTime - flaskData.processing_time_ms,
@@ -262,10 +307,9 @@ const checkAIHealth = async (req, res, next) => {
       status: 'success',
       data: {
         aiServerStatus: response.data.status,
-        modelLoaded: response.data.model_loaded,
+        models: response.data.models || null,
         device: response.data.device,
-        nodeServerTimestamp: new Date().toISOString(),
-        flaskServerTimestamp: response.data.timestamp
+        nodeServerTimestamp: new Date().toISOString()
       },
       message: 'AI server is healthy',
       timestamp: new Date().toISOString()
@@ -274,7 +318,7 @@ const checkAIHealth = async (req, res, next) => {
   } catch (error) {
     console.log('❌ AI server health check failed:', error.message);
     
-    res.status(503).json({
+    res.status(200).json({ // Changed to 200 to allow frontend to handle "unavailable" gracefully
       status: 'error',
       message: 'AI server is not available',
       data: {
@@ -289,17 +333,12 @@ const checkAIHealth = async (req, res, next) => {
 // Routes
 router.post(
   '/',
-  protect,
-  blockAnalystWrites,
-  authorize('captain', 'engineer'),
-  upload.single('image'),
-  aiEnhanceImage
+  upload.single('file'), // Changed from 'image' to 'file' to be more generic
+  aiEnhanceMedia
 );
 router.get('/health', checkAIHealth);
 router.get(
   '/history',
-  protect,
-  authorizeAllRegistered(),
   getAIEnhancementHistory
 );
 

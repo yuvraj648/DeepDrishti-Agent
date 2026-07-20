@@ -24,14 +24,17 @@ function cameraForFeed(feed) {
 }
 
 function mapToDetectionObjectLabel(detectedObject, threatType) {
-  const s = String(detectedObject || '').toLowerCase();
-  if (s.includes('sub') || threatType === 'object') {
+  const s = String(detectedObject || '').toUpperCase();
+  if (s.includes('MINE')) {
+    return 'Sea Mine (Hazard)';
+  }
+  if (s.includes('SUB') || threatType === 'object') {
     return 'Unidentified Submersible';
   }
-  if (s.includes('bio') || s.includes('acoustic')) {
+  if (s.includes('BIO') || s.includes('ACOUSTIC')) {
     return 'Bio-Acoustic Anomaly';
   }
-  if (s.includes('debris') || s.includes('equipment') || s.includes('marine')) {
+  if (s.includes('DEBRIS') || s.includes('EQUIPMENT') || s.includes('MARINE')) {
     return 'Draft Variance';
   }
   return 'Unknown Marine Movement';
@@ -169,21 +172,50 @@ class DetectionService {
   // Send frame data to Flask detection API
   async sendToFlaskAPI(frameData) {
     try {
-      const response = await axios.post(`${this.flaskApiUrl}/detect`, frameData, {
-        timeout: 10000, // 10 second timeout
+      console.log(`📡 Sending ${frameData.frameUrl || 'image'} to Flask pipeline...`);
+      // Use /pipeline instead of /detect to get enhancement and depth
+      const response = await axios.post(`${this.flaskApiUrl}/pipeline`, frameData, {
+        timeout: 30000, // Increased timeout for full pipeline (YouTube extraction + ML)
         headers: {
           'Content-Type': 'application/json'
         }
       });
 
-      return response.data;
-    } catch (error) {
-      // If Flask API is not available, simulate detection
-      if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
-        console.warn('Flask API unavailable, simulating detection...');
-        return this.simulateDetection(frameData);
+      if (!response.data || !response.data.success) {
+        throw new Error(response.data?.error || 'Flask pipeline failed');
       }
-      throw error;
+
+      // Flatten the response for compatibility with existing code
+      const result = response.data.data;
+      console.log(`✅ Flask response received. Detections: ${result.detections?.length || 0}`);
+
+      const detections = Array.isArray(result.detections) ? result.detections : [];
+      const topDetection = detections.length
+        ? [...detections].sort((a, b) => (b.confidence || 0) - (a.confidence || 0))[0]
+        : null;
+      
+      return {
+        threat: detections.some(d => d.status === 'DANGER') || false,
+        confidence: detections.length > 0 
+          ? Math.max(...detections.map(d => d.confidence))
+          : 0,
+        type: detections.length > 0
+          ? (topDetection?.status || 'normal').toLowerCase()
+          : 'normal',
+        detectedObject: topDetection?.class || topDetection?.raw_class || null,
+        boundingBox: topDetection?.bbox || null,
+        distance_m: typeof topDetection?.distance_m === 'number' ? topDetection.distance_m : null,
+        modelsUsed: Array.isArray(topDetection?.models_used) ? topDetection.models_used : ['FUNIE-GAN', 'YOLOv8', 'MiDaS'],
+        frameTimestamp: frameData.timestamp || new Date(),
+        detections,
+        metrics: result.metrics || {},
+        enhancedImage: result.enhanced_image_path
+      };
+    } catch (error) {
+      console.error('❌ Flask API error:', error.message);
+      // If Flask API is not available or fails, simulate detection
+      console.warn('Simulating detection due to Flask error...');
+      return this.simulateDetection(frameData);
     }
   }
 
@@ -274,12 +306,20 @@ class DetectionService {
             : 'threat',
           confidence: detectionResult.confidence,
           severity: sev,
+          location: feed.location || 'Unknown Location',
+          sector: feed.sector || 'Unassigned Sector',
           detectionData: {
             threat: detectionResult.threat,
             detectedObject: detectionResult.detectedObject || objectLabel,
             boundingBox: detectionResult.boundingBox,
-            frameTimestamp: new Date(),
+            frameTimestamp: detectionResult.frameTimestamp || new Date(),
             processingTime: detectionResult.processingTime,
+            distance_m:
+              typeof detectionResult.distance_m === 'number'
+                ? detectionResult.distance_m
+                : (detectionResult.detections?.[0]?.distance_m || (1 - (detectionResult.confidence || 0.5)) * 12),
+            modelsUsed: detectionResult.modelsUsed,
+            snapshotPath: detectionResult.enhancedImage,
           },
           title: this.generateAlertTitle(detectionResult),
           description: this.generateAlertDescription(feed, detectionResult),
@@ -291,34 +331,105 @@ class DetectionService {
         await Feed.findByIdAndUpdate(feed._id, { $inc: { activeAlerts: 1 } });
 
         try {
-          await Detection.create({
-            id: generateDetectionId(),
-            cameraSource: cameraForFeed(feed),
-            objectDetected: objectLabel,
-            confidence: Math.min(
-              100,
-              Math.max(0, Math.round(detectionResult.confidence * 100))
-            ),
-            timestamp: new Date(),
-            status: 'investigating',
-            aiModel: settings?.aiModel || 'UNet-UW-Detector V1.0',
-          });
+          const detList = Array.isArray(detectionResult.detections)
+            ? detectionResult.detections
+            : [];
+
+          const toThreatStatus = (d) => {
+            const s = String(d?.status || '').toUpperCase();
+            if (s === 'DANGER') return 'DANGER';
+            if (s === 'SAFE') return 'SAFE';
+            if (s === 'CLEAR') return 'CLEAR';
+            return 'NEUTRAL';
+          };
+
+          const records = detList.length
+            ? detList
+            : [
+                {
+                  class: detectionResult.detectedObject || objectLabel,
+                  confidence: detectionResult.confidence,
+                  bbox: detectionResult.boundingBox,
+                  distance_m: detectionResult.distance_m,
+                  models_used: detectionResult.modelsUsed,
+                  status: detectionResult.threat ? 'DANGER' : 'NEUTRAL',
+                },
+              ];
+
+          await Detection.insertMany(
+            records.map((d) => ({
+              id: generateDetectionId(),
+              cameraSource: cameraForFeed(feed),
+              objectDetected: d.class || d.raw_class || detectionResult.detectedObject || objectLabel,
+              confidence: Math.min(
+                100,
+                Math.max(0, Math.round((d.confidence ?? detectionResult.confidence ?? 0) * 100))
+              ),
+              timestamp: detectionResult.frameTimestamp || new Date(),
+              status: 'investigating',
+              threatStatus: toThreatStatus(d),
+              distance_m: typeof d.distance_m === 'number' ? d.distance_m : null,
+              modelsUsed: Array.isArray(d.models_used)
+                ? d.models_used
+                : Array.isArray(detectionResult.modelsUsed)
+                  ? detectionResult.modelsUsed
+                  : null,
+              boundingBox: d.bbox || null,
+              feedId: feed._id,
+              locationText: feed.location,
+              sector: feed.sector,
+              snapshotPath: detectionResult.enhancedImage || null,
+              enhancedImage: detectionResult.enhancedImage || null,
+            })),
+            { ordered: false }
+          );
         } catch (detErr) {
-          console.warn('Detection record not saved:', detErr.message);
+          console.error('Error creating detection record:', detErr);
         }
+      }
 
-        await SystemLog.create({
-          severity: sev === 'critical' || sev === 'high' ? 'WARN' : 'INFO',
-          module: 'AI-DETECTOR',
-          message: `Alert raised: ${alert.title} | ${feed.title} | conf ${(detectionResult.confidence * 100).toFixed(1)}%`,
-          meta: {
-            alertId: String(alert._id),
-            feedId: String(feed._id),
-            type: alertData.type,
-          },
-        });
+      // Also store non-alert detections for the detection records table
+      if (!detectionResult.threat || detectionResult.confidence <= threshold) {
+        try {
+          const detList = Array.isArray(detectionResult.detections)
+            ? detectionResult.detections
+            : [];
+          if (!detList.length) return;
 
-        console.log(`Alert created for feed ${feed.title}: ${alert.title}`);
+          const toThreatStatus = (d) => {
+            const s = String(d?.status || '').toUpperCase();
+            if (s === 'DANGER') return 'DANGER';
+            if (s === 'SAFE') return 'SAFE';
+            if (s === 'CLEAR') return 'CLEAR';
+            return 'NEUTRAL';
+          };
+
+          await Detection.insertMany(
+            detList.map((d) => ({
+              id: generateDetectionId(),
+              cameraSource: cameraForFeed(feed),
+              objectDetected: d.class || d.raw_class || 'unknown',
+              confidence: Math.min(
+                100,
+                Math.max(0, Math.round((d.confidence ?? 0) * 100))
+              ),
+              timestamp: detectionResult.frameTimestamp || new Date(),
+              status: 'investigating',
+              threatStatus: toThreatStatus(d),
+              distance_m: typeof d.distance_m === 'number' ? d.distance_m : null,
+              modelsUsed: Array.isArray(d.models_used) ? d.models_used : null,
+              boundingBox: d.bbox || null,
+              feedId: feed._id,
+              locationText: feed.location,
+              sector: feed.sector,
+              snapshotPath: detectionResult.enhancedImage || null,
+              enhancedImage: detectionResult.enhancedImage || null,
+            })),
+            { ordered: false }
+          );
+        } catch (detErr) {
+          console.error('Error creating detection record:', detErr);
+        }
       }
     } catch (error) {
       console.error('Error processing detection result:', error);

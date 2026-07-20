@@ -11,13 +11,11 @@ const detectionSchema = new mongoose.Schema({
   cameraSource: {
     type: String,
     required: false,
-    enum: ['CAM_ALPHA_01', 'CAM_ALPHA_02', 'CAM_ALPHA_03', 'CAM_ALPHA_04'],
     trim: true
   },
   objectDetected: {
     type: String,
     required:false,
-    enum: ['Unidentified Submersible', 'Bio-Acoustic Anomaly', 'Unknown Marine Movement', 'Draft Variance'],
     trim: true
   },
   confidence: {
@@ -36,6 +34,36 @@ const detectionSchema = new mongoose.Schema({
     required: true,
     enum: ['investigating', 'confirmed', 'false_positive'],
     default: 'investigating'
+  },
+
+  threatStatus: {
+    type: String,
+    enum: ['DANGER', 'NEUTRAL', 'SAFE', 'CLEAR'],
+    default: 'NEUTRAL'
+  },
+
+  distance_m: Number,
+  modelsUsed: [String],
+  boundingBox: mongoose.Schema.Types.Mixed,
+
+  feedId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Feed',
+    required: false
+  },
+  sector: {
+    type: String,
+    required: false,
+    trim: true
+  },
+  locationText: {
+    type: String,
+    required: false,
+    trim: true
+  },
+  snapshotPath: {
+    type: String,
+    required: false
   },
 
   // Image Data
@@ -97,6 +125,7 @@ const detectionSchema = new mongoose.Schema({
 detectionSchema.index({ cameraSource: 1 });
 detectionSchema.index({ objectDetected: 1 });
 detectionSchema.index({ status: 1 });
+detectionSchema.index({ threatStatus: 1 });
 detectionSchema.index({ timestamp: -1 });
 detectionSchema.index({ confidence: 1 });
 

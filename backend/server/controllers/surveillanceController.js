@@ -63,6 +63,15 @@ exports.getAiAnalysis = async (req, res) => {
         name,
         confidencePct: Math.round((a.confidence ?? 0) * 100),
         severity: a.severity,
+        distance_m:
+          typeof a.detectionData?.distance_m === 'number'
+            ? a.detectionData.distance_m
+            : null,
+        timestamp: a.detectionData?.frameTimestamp || a.createdAt || null,
+        models: Array.isArray(a.detectionData?.modelsUsed)
+          ? a.detectionData.modelsUsed
+          : null,
+        snapshotPath: a.detectionData?.snapshotPath || null,
       });
     });
 

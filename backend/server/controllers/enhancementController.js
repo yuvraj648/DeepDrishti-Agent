@@ -67,7 +67,7 @@ const enhanceImage = async (req, res, next) => {
       console.log('📤 Sending request to Flask AI server...');
       
       // Send request to Flask AI enhancement server
-      const flaskResponse = await axios.post(`${FLASK_SERVER_URL}/enhance`, formData, {
+      const flaskResponse = await axios.post(`${FLASK_SERVER_URL}/pipeline`, formData, {
         headers: {
           ...formData.getHeaders(),
           'Accept': 'application/json'
@@ -155,7 +155,13 @@ const enhanceImage = async (req, res, next) => {
     const labMetrics = buildEnhancementLabMetrics(
       processingTime,
       req.file.size,
-      flaskPayloadExtras
+      {
+        ...flaskPayloadExtras,
+        psnr: dataBlock.metrics?.psnr,
+        ssim: dataBlock.metrics?.ssim,
+        uiqm: dataBlock.metrics?.uiqm,
+        detections: dataBlock.detections
+      }
     );
 
     res.status(200).json({

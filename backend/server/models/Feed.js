@@ -55,10 +55,8 @@ const feedSchema = new mongoose.Schema({
   
   // Last Detection Info
   lastDetection: {
-    timestamp: Date,
-    threat: Boolean,
-    confidence: Number,
-    type: String
+    type: mongoose.Schema.Types.Mixed,
+    default: null,
   },
   
   // Statistics
@@ -123,12 +121,14 @@ feedSchema.pre('save', function(next) {
 
 // Virtual for formatted creation date
 feedSchema.virtual('createdAtFormatted').get(function() {
-  return this.createdAt.toISOString().replace('T', ' ').substring(0, 19);
+  return (this.createdAt && typeof this.createdAt.toISOString === 'function') 
+    ? this.createdAt.toISOString().replace('T', ' ').substring(0, 19)
+    : 'N/A';
 });
 
 // Virtual for formatted last detection
 feedSchema.virtual('lastDetectionFormatted').get(function() {
-  if (!this.lastDetection || !this.lastDetection.timestamp) {
+  if (!this.lastDetection || !this.lastDetection.timestamp || typeof this.lastDetection.timestamp.toISOString !== 'function') {
     return 'No detections';
   }
   return this.lastDetection.timestamp.toISOString().replace('T', ' ').substring(0, 19);
