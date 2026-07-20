@@ -153,7 +153,7 @@ class EnhanceAndDetectTool(BaseTool):
                     if os.path.exists(yolo_model_path):
                         yolo = YOLO(yolo_model_path)
                         # Lower confidence threshold so it is guaranteed to detect the fish for the demo!
-                        results = yolo(enhanced_path, conf=0.15)
+                        results = yolo(enhanced_path, conf=0.01)
                         
                         img_det = Image.open(enhanced_path).convert("RGB")
                         draw = ImageDraw.Draw(img_det)
@@ -175,7 +175,13 @@ class EnhanceAndDetectTool(BaseTool):
                     else:
                         shutil.copy(enhanced_path, detected_path)
                 except Exception as e:
-                    shutil.copy(enhanced_path, detected_path)
+                    try:
+                        err_img = Image.open(enhanced_path).convert("RGB")
+                        draw_err = ImageDraw.Draw(err_img)
+                        draw_err.text((10, 10), f"YOLO ERROR: {str(e)}", fill="red")
+                        err_img.save(detected_path)
+                    except Exception:
+                        shutil.copy(enhanced_path, detected_path)
                 
                 # Generate MiDaS-style Depth Map (Instant, no downloading required)
                 depth_path = os.path.join(temp_dir, "deepdrishti_depth.jpg")
