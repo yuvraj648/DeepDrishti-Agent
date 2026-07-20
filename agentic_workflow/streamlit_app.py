@@ -144,43 +144,93 @@ class EnhanceAndDetectTool(BaseTool):
                 enhanced_path = os.path.join(temp_dir, "deepdrishti_enhanced.jpg")
                 out_img.save(enhanced_path)
                 
-                # Try to load YOLO and run detection
+                # Try to load YOLO and run detection (Pure PIL, NO OpenCV)
                 detected_path = os.path.join(temp_dir, "deepdrishti_detected.jpg")
                 try:
                     from ultralytics import YOLO
+                    from PIL import ImageDraw
                     yolo_model_path = os.path.join(os.path.dirname(__file__), '..', 'model', 'models', 'best.pt')
                     if os.path.exists(yolo_model_path):
                         yolo = YOLO(yolo_model_path)
                         results = yolo(enhanced_path)
-                        res_plotted = results[0].plot() # numpy array in BGR
-                        res_rgb = res_plotted[..., ::-1] # convert BGR to RGB
-                        Image.fromarray(res_rgb).save(detected_path)
+                        
+                        img_det = Image.open(enhanced_path).convert("RGB")
+                        draw = ImageDraw.Draw(img_det)
+                        
+                        # Manually draw boxes to completely avoid OpenCV
+                        for box in results[0].boxes:
+                            x1, y1, x2, y2 = box.xyxy[0].tolist()
+                            conf = float(box.conf[0])
+                            cls = int(box.cls[0])
+                            name = results[0].names[cls]
+                            
+                            # Draw thick red box
+                            draw.rectangle([x1, y1, x2, y2], outline="red", width=4)
+                            # Draw label background and text
+                            draw.rectangle([x1, y1-20, x1+100, y1], fill="red")
+                            draw.text((x1+5, y1-15), f"{name} {conf:.2f}", fill="white")
+                            
+                        img_det.save(detected_path)
                     else:
                         import shutil
                         shutil.copy(enhanced_path, detected_path)
-                except Exception:
+                except Exception as e:
                     import shutil
                     shutil.copy(enhanced_path, detected_path)
                 
-                # Generate Pseudo Depth Map (Heatmap style)
+                # Real MiDaS Depth Map Generation (or high-quality fallback)
                 depth_path = os.path.join(temp_dir, "deepdrishti_depth.jpg")
                 try:
+                    import torch
                     import numpy as np
-                    img = Image.open(enhanced_path).convert('L')
-                    img = img.filter(ImageFilter.GaussianBlur(5))
-                    img = ImageOps.invert(img)
+                    from PIL import Image
                     
-                    # Apply a custom colorful heatmap using purely numpy
-                    arr = np.array(img)
-                    heatmap = np.zeros((arr.shape[0], arr.shape[1], 3), dtype=np.uint8)
-                    heatmap[:, :, 0] = arr  # Red = closer
-                    heatmap[:, :, 1] = arr // 2  # Green
-                    heatmap[:, :, 2] = 255 - arr # Blue = farther
+                    # Try Real MiDaS
+                    midas = torch.hub.load("intel-isl/MiDaS", "MiDaS_small")
+                    midas.eval()
+                    midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
+                    transform = midas_transforms.small_transform
+                    
+                    img_depth = np.array(Image.open(enhanced_path).convert("RGB"))
+                    input_batch = transform(img_depth)
+                    
+                    with torch.no_grad():
+                        prediction = midas(input_batch)
+                        prediction = torch.nn.functional.interpolate(
+                            prediction.unsqueeze(1),
+                            size=(img_depth.shape[0], img_depth.shape[1]),
+                            mode="bicubic",
+                            align_corners=False,
+                        ).squeeze()
+                    
+                    output = prediction.cpu().numpy()
+                    
+                    # Normalize to 0-255
+                    output = (output - output.min()) / (output.max() - output.min()) * 255.0
+                    output = output.astype(np.uint8)
+                    
+                    # Create Inferno-style colormap natively in numpy
+                    heatmap = np.zeros((output.shape[0], output.shape[1], 3), dtype=np.uint8)
+                    heatmap[:, :, 0] = np.clip(output * 1.5, 0, 255)      # Red
+                    heatmap[:, :, 1] = np.clip(output * 0.8, 0, 255)      # Green
+                    heatmap[:, :, 2] = np.clip(255 - output * 1.2, 0, 255) # Blue
                     
                     Image.fromarray(heatmap).save(depth_path)
                 except Exception:
-                    import shutil
-                    shutil.copy(enhanced_path, depth_path)
+                    # High-quality pseudo depth fallback if torch hub fails
+                    import numpy as np
+                    from PIL import Image, ImageOps, ImageFilter, ImageEnhance
+                    img = Image.open(enhanced_path).convert('L')
+                    img = ImageEnhance.Contrast(img).enhance(3.0)
+                    img = img.filter(ImageFilter.GaussianBlur(3))
+                    img = ImageOps.invert(img)
+                    
+                    arr = np.array(img)
+                    heatmap = np.zeros((arr.shape[0], arr.shape[1], 3), dtype=np.uint8)
+                    heatmap[:, :, 0] = np.clip(arr * 1.5, 0, 255)
+                    heatmap[:, :, 1] = np.clip(arr * 0.8, 0, 255)
+                    heatmap[:, :, 2] = np.clip(255 - arr * 1.2, 0, 255)
+                    Image.fromarray(heatmap).save(depth_path)
                 
                 return (
                     "Success! DeepDrishti Pipeline Complete:\n"
