@@ -6,15 +6,18 @@ import torchvision.transforms as transforms
 from PIL import Image
 import numpy as np
 
-# Try to import langchain (needs: pip install langchain langchain-openai openai pydantic)
+from pydantic import BaseModel, Field
+
+# Try to import langchain
 try:
     from langchain.agents import initialize_agent, AgentType
-    from langchain.chat_models import ChatOpenAI
+    from langchain_openai import ChatOpenAI
     from langchain.tools import BaseTool
-    from pydantic import BaseModel, Field
     HAS_LANGCHAIN = True
 except ImportError:
     HAS_LANGCHAIN = False
+    class BaseTool:
+        pass
 
 # Import the actual U-Net model from the parent model directory (if running locally)
 # For deployment, we will copy model.py and model.pth into the same directory.
