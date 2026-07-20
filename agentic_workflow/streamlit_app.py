@@ -9,15 +9,10 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 # Try to import langchain and groq
-try:
-    from langchain.agents import initialize_agent, AgentType
-    from langchain_groq import ChatGroq
-    from langchain.tools import BaseTool
-    HAS_LANGCHAIN = True
-except ImportError:
-    HAS_LANGCHAIN = False
-    class BaseTool:
-        pass
+from langchain.agents import initialize_agent, AgentType
+from langchain_groq import ChatGroq
+from langchain.tools import BaseTool
+HAS_LANGCHAIN = True
 
 import sys
 # Add parent dir to path just in case we are running locally in agentic_workflow
